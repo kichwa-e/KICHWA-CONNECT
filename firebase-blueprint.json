@@ -1,0 +1,85 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile document",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "photoURL": { "type": "string" },
+        "email": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["uid", "displayName"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "A conversation between two users",
+      "type": "object",
+      "properties": {
+        "participantIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "participantNames": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "lastMessage": { "type": "string" },
+        "lastMessageTimestamp": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["participantIds"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A chat message",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["senderId", "text", "createdAt"]
+    },
+    "Ticket": {
+      "title": "Repair Ticket",
+      "description": "A device repair ticket",
+      "type": "object",
+      "properties": {
+        "ticketNo": { "type": "string" },
+        "deviceType": { "type": "string" },
+        "deviceModel": { "type": "string" },
+        "issue": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "status": { "type": "string" },
+        "diagnosisNotes": { "type": "string" },
+        "repairCost": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["ticketNo", "deviceType", "deviceModel", "issue", "customerName", "customerPhone", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Public user profiles"
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Conversations between users"
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Messages inside a conversation"
+    },
+    "/tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/Ticket" },
+      "description": "Repair tickets"
+    }
+  }
+}

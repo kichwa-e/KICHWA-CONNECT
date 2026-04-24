@@ -1,0 +1,145 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'kichwarepair@gmail.com';
+    }
+
+    function isValidUser(data) {
+      let hasRequired = data.keys().hasAll(['uid', 'displayName', 'visibility', 'createdAt']);
+      let hasPhoto = data.keys().hasAll(['photoURL']);
+      let validSize = hasPhoto ? data.keys().size() == 5 : data.keys().size() == 4;
+      return hasRequired && validSize &&
+             data.uid == request.auth.uid &&
+             data.visibility == 'public' &&
+             data.createdAt is timestamp &&
+             data.displayName is string && data.displayName.size() <= 100 &&
+             (hasPhoto == false || (data.photoURL is string && data.photoURL.size() <= 2000));
+    }
+
+    function isValidConversation(data) {
+      let hasRequired = data.keys().hasAll(['participantIds', 'createdAt', 'updatedAt']);
+      let hasLastMessage = data.keys().hasAll(['lastMessage', 'lastMessageTimestamp']);
+      let hasNames = data.keys().hasAll(['participantNames']);
+      
+      let baseSize = 3;
+      let sizeWithMsg = hasLastMessage ? baseSize + 2 : baseSize;
+      let finalSize = hasNames ? sizeWithMsg + 1 : sizeWithMsg;
+
+      return hasRequired && data.keys().size() == finalSize &&
+             data.participantIds is list &&
+             data.participantIds.size() == 2 &&
+             data.participantIds[0] is string && data.participantIds[1] is string &&
+             request.auth.uid in data.participantIds &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp &&
+             (hasLastMessage == false || (data.lastMessage is string && data.lastMessage.size() <= 1000 && data.lastMessageTimestamp is timestamp)) &&
+             (hasNames == false || data.participantNames is map);
+    }
+    
+    function isValidMessage(data) {
+      return data.keys().hasAll(['senderId', 'text', 'createdAt']) &&
+             data.keys().size() == 3 &&
+             data.senderId == request.auth.uid &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 2000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidTicket(data) {
+      let hasRequired = data.keys().hasAll(['ticketNo', 'deviceType', 'deviceModel', 'issue', 'customerName', 'customerPhone', 'status', 'createdAt', 'updatedAt']);
+      let hasDiagnosis = data.keys().hasAll(['diagnosisNotes']);
+      let hasCost = data.keys().hasAll(['repairCost']);
+      
+      let baseSize = 9;
+      let sizeWithDiag = hasDiagnosis ? baseSize + 1 : baseSize;
+      let finalSize = hasCost ? sizeWithDiag + 1 : sizeWithDiag;
+
+      return hasRequired && data.keys().size() == finalSize &&
+             data.ticketNo is string && data.ticketNo.size() <= 20 &&
+             data.deviceType is string && data.deviceType.size() <= 100 &&
+             data.deviceModel is string && data.deviceModel.size() <= 100 &&
+             data.issue is string && data.issue.size() <= 2000 &&
+             data.customerName is string && data.customerName.size() <= 100 &&
+             data.customerPhone is string && data.customerPhone.size() <= 50 &&
+             data.status in ['created', 'received', 'diagnosing', 'repairing', 'ready', 'completed'] &&
+             (hasDiagnosis == false || (data.diagnosisNotes is string && data.diagnosisNotes.size() <= 2000)) &&
+             (hasCost == false || (data.repairCost is number && data.repairCost >= 0)) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && resource.data.visibility == 'public';
+      allow list: if isSignedIn() && resource.data.visibility == 'public';
+      allow create: if isSignedIn() && 
+                    isValidId(userId) && 
+                    userId == request.auth.uid &&
+                    isValidUser(incoming()) && 
+                    incoming().createdAt == request.time;
+      allow update: if isSignedIn() &&
+                    isValidId(userId) &&
+                    userId == request.auth.uid &&
+                    isValidUser(incoming()) &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
+    }
+
+    match /conversations/{conversationId} {
+      allow get: if isSignedIn() && isValidId(conversationId) && request.auth.uid in existing().participantIds;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
+      allow create: if isSignedIn() && 
+                    isValidId(conversationId) &&
+                    isValidConversation(incoming()) &&
+                    incoming().createdAt == request.time &&
+                    incoming().updatedAt == request.time;
+      allow update: if isSignedIn() &&
+                    isValidId(conversationId) &&
+                    request.auth.uid in existing().participantIds &&
+                    isValidConversation(incoming()) &&
+                    incoming().participantIds == existing().participantIds &&
+                    incoming().updatedAt == request.time &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'lastMessageTimestamp', 'updatedAt', 'participantNames']);
+    }
+
+    match /conversations/{conversationId}/messages/{messageId} {
+      allow read: if isSignedIn() &&
+                  isValidId(conversationId) && isValidId(messageId) &&
+                  request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+      allow create: if isSignedIn() &&
+                    isValidId(conversationId) && isValidId(messageId) &&
+                    request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds &&
+                    isValidMessage(incoming()) &&
+                    incoming().createdAt == request.time;
+    }
+
+    match /tickets/{ticketId} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create: if isValidId(ticketId) &&
+                    isValidTicket(incoming()) &&
+                    incoming().ticketNo == ticketId &&
+                    incoming().createdAt == request.time &&
+                    incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+                    isValidId(ticketId) &&
+                    isValidTicket(incoming()) &&
+                    incoming().ticketNo == existing().ticketNo &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().updatedAt == request.time &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['status', 'diagnosisNotes', 'repairCost', 'updatedAt']);
+    }
+  }
+}
